@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Email Header Analyzer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: sans-serif;
+      background: #f4f4f4;
+      padding: 30px 20px;
+      color: #1a1a1a;
+    }
+    .container { max-width: 750px; margin: auto; }
+    h1 { font-size: 26px; margin-bottom: 6px; }
+    p.sub { color: #666; margin-bottom: 24px; font-size: 14px; }
+    textarea {
+      width: 100%;
+      height: 180px;
+      padding: 14px;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      font-family: monospace;
+      font-size: 13px;
+      resize: vertical;
+      background: white;
+    }
+    button {
+      margin-top: 14px;
+      padding: 10px 30px;
+      background: #1a1a1a;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    button:hover { background: #333; }
+    .results { margin-top: 28px; }
+    .score-box {
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .score-box h2 { font-size: 22px; margin-bottom: 4px; }
+    .score-box p { font-size: 14px; }
+    .safe { background: #dcfce7; color: #166534; }
+    .suspicious { background: #fef9c3; color: #854d0e; }
+    .dangerous { background: #fee2e2; color: #991b1b; }
+    .card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 14px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 10px;
+    }
+    .check {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid #f3f4f6;
+      font-size: 14px;
+    }
+    .check:last-child { border-bottom: none; }
+    .icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+    .check-label { font-weight: 500; }
+    .check-detail { color: #6b7280; font-size: 13px; margin-top: 2px; }
+    .tag {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+    .tag-pass { background: #dcfce7; color: #166534; }
+    .tag-fail { background: #fee2e2; color: #991b1b; }
+    .tag-warn { background: #fef9c3; color: #854d0e; }
+    .tag-info { background: #dbeafe; color: #1e40af; }
+    .route {
+      font-family: monospace;
+      font-size: 12px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 12px;
+      line-height: 1.8;
+    }
+    .hidden { display: none; }
+    .sample-btn {
+      background: none;
+      border: 1px solid #ccc;
+      color: #555;
+      font-size: 13px;
+      padding: 6px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    .sample-btn:hover { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>📧 Email Header Analyzer</h1>
+  <p class="sub">Paste raw email headers below to detect spoofing, phishing, and email-based threats.</p>
+
+  <textarea id="headerInput" placeholder="Paste your raw email headers here...
+Example:
+Received: from mail.example.com (192.168.1.1)
+From: support@paypal.com
+Reply-To: hacker@evil.com
+X-Mailer: Microsoft Outlook"></textarea>
+
+  <br>
+  <button onclick="analyze()">🔍 Analyze Headers</button>
+  <button class="sample-btn" onclick="loadSample()">Load Sample Suspicious Email</button>
+
+  <div class="results hidden" id="results"></div>
+</div>
+
+<script>
+function loadSample() {
+  document.getElementById('headerInput').value = `Received: from mail.evil-domain.xyz (203.45.67.89)
+  by mx.google.com with SMTP id abc123
+From: support@paypal.com
+Reply-To: support@paypa1-security.com
+Return-Path: <bounce@evil-domain.xyz>
+X-Originating-IP: 203.45.67.89
+Received-SPF: fail (domain of paypal.com does not designate 203.45.67.89 as permitted sender)
+DKIM-Signature: v=1; a=rsa-sha256; d=evil-domain.xyz; s=default;
+X-Mailer: Mass Mailer Pro 5.0
+Subject: Urgent: Your PayPal account has been suspended
+Date: Mon, 05 Apr 2026 03:22:11 +0000
+Message-ID: <abc@evil-domain.xyz>`;
+}
+
+function analyze() {
+  const raw = document.getElementById('headerInput').value.trim();
+  if (!raw) { alert('Please paste email headers first.'); return; }
+
+  const headers = parseHeaders(raw);
+  let score = 0;
+  let checks = [];
+
+  // 1. SPF Check
+  const spf = findHeader(headers, 'received-spf') || findHeader(headers, 'authentication-results') || '';
+  if (spf.toLowerCase().includes('fail')) {
+    score += 35;
+    checks.push({ icon: '❌', label: 'SPF Check', tag: 'FAIL', tagClass: 'tag-fail',
+      detail: 'SPF FAILED — sending server is not authorized to send email for this domain. Strong spoofing indicator.' });
+  } else if (spf.toLowerCase().includes('pass')) {
+    checks.push({ icon: '✅', label: 'SPF Check', tag: 'PASS', tagClass: 'tag-pass',
+      detail: 'SPF passed — sending server is authorized by the domain.' });
+  } else {
+    score += 15;
+    checks.push({ icon: '⚠️', label: 'SPF Check', tag: 'NOT FOUND', tagClass: 'tag-warn',
+      detail: 'No SPF record found in headers. Legitimate emails usually include this.' });
+  }
+
+  // 2. DKIM Check
+  const dkim = findHeader(headers, 'dkim-signature') || '';
+  const authResults = findHeader(headers, 'authentication-results') || '';
+  if (dkim) {
+    const dkimDomain = (dkim.match(/d=([^;]+)/) || [])[1] || '';
+    const fromDomain = extractDomain(findHeader(headers, 'from') || '');
+    if (dkimDomain && fromDomain && !dkimDomain.includes(fromDomain) && !fromDomain.includes(dkimDomain)) {
+      score += 30;
+      checks.push({ icon: '❌', label: 'DKIM Domain Match', tag: 'MISMATCH', tagClass: 'tag-fail',
+        detail: `DKIM signed by "${dkimDomain}" but email claims to be from "${fromDomain}". Possible forgery.` });
+    } else {
+      checks.push({ icon: '✅', label: 'DKIM Signature', tag: 'PRESENT', tagClass: 'tag-pass',
+        detail: `DKIM signature found and domain matches sender.` });
+    }
+  } else {
+    score += 20;
+    checks.push({ icon: '⚠️', label: 'DKIM Signature', tag: 'MISSING', tagClass: 'tag-warn',
+      detail: 'No DKIM signature found. Legitimate emails from major providers are always DKIM signed.' });
+  }
+
+  // 3. Reply-To Mismatch
+  const from = findHeader(headers, 'from') || '';
+  const replyTo = findHeader(headers, 'reply-to') || '';
+  const returnPath = findHeader(headers, 'return-path') || '';
+  if (replyTo) {
+    const fromDomain = extractDomain(from);
+    const replyDomain = extractDomain(replyTo);
+    if (fromDomain && replyDomain && fromDomain !== replyDomain) {
+      score += 30;
+      checks.push({ icon: '❌', label: 'Reply-To Mismatch', tag: 'SUSPICIOUS', tagClass: 'tag-fail',
+        detail: `From: ${from.trim()} but Reply-To: ${replyTo.trim()}. Replies will go to a different domain — classic phishing trick.` });
+    } else {
+      checks.push({ icon: '✅', label: 'Reply-To', tag: 'MATCHES', tagClass: 'tag-pass',
+        detail: 'Reply-To domain matches the From domain.' });
+    }
+  }
+
+  // 4. Return-Path Check
+  if (returnPath) {
+    const fromDomain = extractDomain(from);
+    const returnDomain = extractDomain(returnPath);
+    if (fromDomain && returnDomain && fromDomain !== returnDomain) {
+      score += 20;
+      checks.push({ icon: '❌', label: 'Return-Path Mismatch', tag: 'FAIL', tagClass: 'tag-fail',
+        detail: `Return-Path domain (${returnDomain}) differs from From domain (${fromDomain}).` });
+    } else {
+      checks.push({ icon: '✅', label: 'Return-Path', tag: 'MATCHES', tagClass: 'tag-pass',
+        detail: 'Return-Path domain matches sender domain.' });
+    }
+  }
+
+  // 5. Suspicious sender domain
+  const fromEmail = (from.match(/[\w.-]+@[\w.-]+/) || [])[0] || '';
+  const fromDomainFull = fromEmail.split('@')[1] || '';
+  const suspiciousTlds = ['.xyz', '.tk', '.ml', '.ga', '.cf', '.top', '.click', '.loan'];
+  const suspiciousWords = ['secure', 'verify', 'login', 'account', 'update', 'support', 'urgent'];
+  if (suspiciousTlds.some(t => fromDomainFull.endsWith(t))) {
+    score += 25;
+    checks.push({ icon: '❌', label: 'Suspicious Domain TLD', tag: 'RISKY', tagClass: 'tag-fail',
+      detail: `Sender domain "${fromDomainFull}" uses a TLD commonly associated with spam and phishing.` });
+  }
+  if (suspiciousWords.some(w => fromDomainFull.toLowerCase().includes(w))) {
+    score += 15;
+    checks.push({ icon: '⚠️', label: 'Suspicious Domain Name', tag: 'WARNING', tagClass: 'tag-warn',
+      detail: `Sender domain "${fromDomainFull}" contains keywords commonly used in phishing domains.` });
+  }
+
+  // 6. Mailer detection
+  const mailer = findHeader(headers, 'x-mailer') || findHeader(headers, 'user-agent') || '';
+  if (mailer.toLowerCase().includes('mass') || mailer.toLowerCase().includes('bulk')) {
+    score += 20;
+    checks.push({ icon: '❌', label: 'Bulk Mailer Detected', tag: 'SUSPICIOUS', tagClass: 'tag-fail',
+      detail: `X-Mailer: "${mailer.trim()}" — mass mailing software detected.` });
+  } else if (mailer) {
+    checks.push({ icon: 'ℹ️', label: 'Email Client', tag: 'INFO', tagClass: 'tag-info',
+      detail: `Sent using: ${mailer.trim()}` });
+  }
+
+  // 7. Originating IP
+  const ip = findHeader(headers, 'x-originating-ip') || extractFirstIP(findHeader(headers, 'received') || '');
+  if (ip) {
+    checks.push({ icon: 'ℹ️', label: 'Originating IP', tag: 'INFO', tagClass: 'tag-info',
+      detail: `IP address: ${ip} — you can look this up on abuseipdb.com for reputation check.` });
+  }
+
+  // 8. Received hops
+  const received = getAllHeaders(headers, 'received');
+  if (received.length > 5) {
+    score += 10;
+    checks.push({ icon: '⚠️', label: 'Excessive Routing Hops', tag: 'WARNING', tagClass: 'tag-warn',
+      detail: `Email passed through ${received.length} servers — unusually high. Could indicate obfuscation.` });
+  } else if (received.length > 0) {
+    checks.push({ icon: '✅', label: 'Routing Hops', tag: `${received.length} HOPS`, tagClass: 'tag-pass',
+      detail: `Email routed through ${received.length} server(s) — normal range.` });
+  }
+
+  score = Math.min(score, 100);
+
+  let verdict, cls;
+  if (score >= 60) { verdict = '🚨 HIGH RISK — Likely Phishing / Spoofed'; cls = 'dangerous'; }
+  else if (score >= 30) { verdict = '⚠️ SUSPICIOUS — Treat with Caution'; cls = 'suspicious'; }
+  else { verdict = '✅ LIKELY LEGITIMATE'; cls = 'safe'; }
+
+  // Build results HTML
+  let html = `
+    <div class="score-box ${cls}">
+      <h2>${verdict}</h2>
+      <p>Threat Score: ${score} / 100</p>
+    </div>
+    <div class="card">
+      <div class="card-title">Security Checks</div>
+  `;
+
+  checks.forEach(c => {
+    html += `
+      <div class="check">
+        <span class="icon">${c.icon}</span>
+        <div>
+          <span class="check-label">${c.label}</span>
+          <span class="tag ${c.tagClass}">${c.tag}</span>
+          <div class="check-detail">${c.detail}</div>
+        </div>
+      </div>`;
+  });
+  html += `</div>`;
+
+  // Header summary
+  if (from) html += `<div class="card"><div class="card-title">Sender Info</div>
+    <div class="check"><span class="icon">👤</span><div>
+    <span class="check-label">From</span>
+    <div class="check-detail">${from.trim()}</div></div></div>
+    ${replyTo ? `<div class="check"><span class="icon">↩️</span><div>
+    <span class="check-label">Reply-To</span>
+    <div class="check-detail">${replyTo.trim()}</div></div></div>` : ''}
+    ${returnPath ? `<div class="check"><span class="icon">🔙</span><div>
+    <span class="check-label">Return-Path</span>
+    <div class="check-detail">${returnPath.trim()}</div></div></div>` : ''}
+  </div>`;
+
+  document.getElementById('results').innerHTML = html;
+  document.getElementById('results').classList.remove('hidden');
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+}
+
+function parseHeaders(raw) {
+  const result = {};
+  const lines = raw.split('\n');
+  let current = null;
+  lines.forEach(line => {
+    if (/^\s/.test(line) && current) {
+      result[current] += ' ' + line.trim();
+    } else {
+      const m = line.match(/^([\w-]+):\s*(.*)/);
+      if (m) {
+        current = m[1].toLowerCase();
+        result[current] = (result[current] ? result[current] + '\n' : '') + m[2];
+      }
+    }
+  });
+  return result;
+}
+
+function findHeader(headers, key) {
+  return headers[key.toLowerCase()] || null;
+}
+
+function getAllHeaders(headers, key) {
+  const val = headers[key.toLowerCase()];
+  if (!val) return [];
+  return val.split('\n').filter(Boolean);
+}
+
+function extractDomain(str) {
+  const m = str.match(/[\w.-]+@([\w.-]+)/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function extractFirstIP(str) {
+  const m = str.match(/\b(\d{1,3}\.){3}\d{1,3}\b/);
+  return m ? m[0] : null;
+}
+</script>
+</body>
+</html>
